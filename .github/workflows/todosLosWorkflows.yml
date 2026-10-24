@@ -1,0 +1,158 @@
+name: Ejecutar en orden
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+concurrency:
+  group: regenerar-main
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  TodosMisPasos:
+    runs-on: ubuntu-latest
+
+    env:
+      CARPETAS: |
+        CaperucitaFeroz
+        SenoritaAnaBitono
+        SenoritaAnaColor
+
+
+
+    steps:
+
+      - name: Descargar el repositorio
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Detectar cambios
+        uses: dorny/paths-filter@v4
+        id: cambios
+        with:
+          base: ${{ github.ref }}
+          filters: |
+            latex:
+              - 'latex/*.{tex,cls}'
+            imagenes:
+              - 'CaperucitaFeroz/*.{jpg,jpeg,png,webp}'
+              - 'SenoritaAnaBitono/*.{jpg,jpeg,png,webp}'
+              - 'SenoritaAnaColor/*.{jpg,jpeg,png,webp}'
+
+      - name: Instalar ImageMagick
+        uses: mfinelli/setup-imagemagick@v8
+        if: steps.cambios.outputs.imagenes == 'true'
+        with:
+          cache: true
+          install-libfuse2: false
+
+      - name: Borrar y regenerar thumbnails
+        shell: bash
+        if: steps.cambios.outputs.imagenes == 'true'
+        run: |
+          set -euo pipefail
+
+          mapfile -t carpetas < <(printf '%s\n' "$CARPETAS" | sed '/^[[:space:]]*$/d')
+          shopt -s nullglob nocaseglob
+
+          for CARPETA in "${carpetas[@]}"; do
+            echo "Procesando: $CARPETA"
+
+            rm -rf "$CARPETA/thumbnails"
+            mkdir -p "$CARPETA/thumbnails"
+
+            for archivo in "$CARPETA"/*.{jpg,jpeg,png,webp}; do
+              nombre="$(basename "$archivo")"
+              base="${nombre%.*}"
+
+              magick "$archivo" \
+                -auto-orient \
+                -resize '150x' \
+                "$CARPETA/thumbnails/${base}.thumbnail.jpg"
+            done
+          done
+
+      - name: Crear listado_fotos.json
+        if: steps.cambios.outputs.imagenes == 'true'
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          extensiones = {".jpg", ".jpeg", ".png", ".webp"}
+          carpetas = [nombre.strip() for nombre in os.environ["CARPETAS"].splitlines() if nombre.strip()]
+          listado = {}
+
+          for nombre in carpetas:
+              carpeta = Path(nombre)
+
+              if carpeta.name != nombre or not carpeta.is_dir():
+                  raise SystemExit(f"No encuentro una carpeta válida en la raíz: {nombre}")
+
+              fotos = sorted({
+                  archivo.stem
+                  for archivo in carpeta.iterdir()
+                  if archivo.is_file() and archivo.suffix.lower() in extensiones
+              })
+
+              listado[nombre] = fotos
+
+          Path("listado_fotos.json").write_text(
+              json.dumps(listado, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8"
+          )
+          PY
+
+      - name: Crear carpeta de salida de pdfs
+        if: steps.cambios.outputs.latex == 'true'
+        run: rm -rf latex/pdf && mkdir -p latex/pdf
+
+      - name: Compilar todos los .tex de latex
+        uses: xu-cheng/latex-action@v4
+        if: steps.cambios.outputs.latex == 'true'
+        with:
+          working_directory: latex
+          root_file: "*.tex"
+          args: "-pdf -file-line-error -halt-on-error -interaction=nonstopmode -output-directory=pdf"
+
+      - name: Limpiar archivos auxiliares de LaTeX
+        shell: bash
+        if: steps.cambios.outputs.latex == 'true'
+        run: |
+          set -euo pipefail
+
+          find latex -type f \( \
+            -name '*.aux' -o \
+            -name '*.log' -o \
+            -name '*.fls' -o \
+            -name '*.fdb_latexmk' -o \
+            -name '*.synctex' -o \
+            -name '*.synctex.gz' -o \
+            -name '*.out' -o \
+            -name '*.toc' -o \
+            -name '*.lof' -o \
+            -name '*.lot' -o \
+            -name '*.bbl' -o \
+            -name '*.blg' -o \
+            -name '*.bcf' -o \
+            -name '*.run.xml' \
+          \) -delete
+
+
+      - name: Crear un único commit y reemplazar main
+        run: |
+          mensaje_anterior="$(git log -1 --pretty=%s)"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git checkout --orphan historial-nuevo
+          git add -A
+          git commit -m "${mensaje_anterior} [DOBLE]"
+          git push --force origin HEAD:main
