@@ -1,0 +1,24 @@
+
+
+# Ignora todo lo que hay directamente dentro de /latex
+/latex/*
+
+# Excepto los archivos LaTeX y de clase que quieras incluir
+!/latex/*.tex
+!/latex/*.cls
+!/latex/*.latex
+!/latex/*.ttex
+
+# Permite la carpeta /latex/pdf para que Git pueda recorrerla
+!/latex/pdf/
+
+# Dentro de /latex/pdf, ignora todo...
+/latex/pdf/*
+
+# ...excepto los archivos PDF
+!/latex/pdf/*.pdf
+
+# Permite la carpeta /latex/Images y todo su contenido,
+# incluidas sus subcarpetas
+!/latex/Images/
+!/latex/Images/**
