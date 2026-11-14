@@ -1,0 +1,36 @@
+name: Ejecutar en orden
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+concurrency:
+  group: regenerar-main
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  TodosMisPasos:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Descargar el repositorio
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Crear un único commit y reemplazar main
+        run: |
+          mensaje_anterior="$(git log -1 --pretty=%s)"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git checkout --orphan historial-nuevo
+          git add -A
+          git commit -m "${mensaje_anterior} [DOBLE]"
+          git push --force origin HEAD:main
